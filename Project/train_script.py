@@ -10,6 +10,13 @@ import numpy as np
 # Load the training prompts from CSV
 train_data = pd.read_csv("train_prompts.csv")
 
+# Print the first few rows and data types of the training data
+print(train_data.head())
+print(train_data.dtypes)
+
+train_data["prompt"] = train_data["prompt"].astype(str)
+train_data["completion"] = train_data["completion"].astype(str)
+
 # Split the dataset into training and validation sets
 train_data, val_data = train_test_split(train_data, test_size=0.1)
 
@@ -27,20 +34,24 @@ tokenizer.pad_token = tokenizer.eos_token
 
 # Tokenize the dataset
 def tokenize_function(examples):
-    # Tokenize the input and target text
+    # Debugging: Print the examples being processed
+    # print(f"Processing batch: {examples}")
+
+    # Tokenize the prompts
     model_inputs = tokenizer(
         examples["prompt"],
         truncation=True,
-        padding="max_length",  # Ensure consistent sequence length
-        max_length=128,        # Adjust max_length based on your dataset
+        padding="max_length",
+        max_length=128,
     )
-    # Tokenize the target text (labels)
+
+    # Tokenize the completions as labels
     with tokenizer.as_target_tokenizer():
         labels = tokenizer(
             examples["completion"],
             truncation=True,
-            padding="max_length",  # Ensure labels match input length
-            max_length=128,        # Same max_length as inputs
+            padding="max_length",
+            max_length=128,
         )
     model_inputs["labels"] = labels["input_ids"]
     return model_inputs
@@ -53,14 +64,15 @@ training_args = TrainingArguments(
     output_dir="./results",  # Directory to save checkpoints
     evaluation_strategy="epoch",  # Evaluate and save at the end of every epoch
     save_strategy="epoch",  # Save the model at the end of every epoch
-    learning_rate=5e-5,
-    per_device_train_batch_size=2,
-    num_train_epochs=5,  # Increased for small datasets
+    learning_rate=1e-5,
+    per_device_train_batch_size=10,
+    num_train_epochs=50,  # Increased for small datasets
     weight_decay=0.01,
     save_total_limit=2,  # Keep only the last 2 checkpoints
     logging_dir="./logs",  # Directory for logs
-    logging_steps=50,  # Log every 50 steps
+    logging_steps=10,  # Log every 10 steps
     fp16=True,  # Enable mixed precision for faster training (if using GPU)
+    gradient_accumulation_steps=4  # Accumulate gradients over 4 steps
 )
 
 # Load BLEU for evaluation
@@ -71,10 +83,10 @@ def compute_metrics(eval_preds):
     predictions, labels = eval_preds
 
     # Debug: Print the type and structure of predictions and labels
-    print(f"Type of predictions: {type(predictions)}")
-    print(f"Type of labels: {type(labels)}")
-    print(f"First prediction: {predictions[0] if isinstance(predictions, (list, np.ndarray)) else 'Not a list or ndarray'}")
-    print(f"First label: {labels[0] if isinstance(labels, (list, np.ndarray)) else 'Not a list or ndarray'}")
+    #print(f"Type of predictions: {type(predictions)}")
+    #print(f"Type of labels: {type(labels)}")
+    #print(f"First prediction: {predictions[0] if isinstance(predictions, (list, np.ndarray)) else 'Not a list or ndarray'}")
+    #print(f"First label: {labels[0] if isinstance(labels, (list, np.ndarray)) else 'Not a list or ndarray'}")
 
     # Convert logits to token IDs
     if isinstance(predictions, np.ndarray):
@@ -115,7 +127,16 @@ tokenizer.save_pretrained(final_model_dir)
 # Load the fine-tuned model for testing
 generator = pipeline("text-generation", model=final_model_dir, tokenizer=final_model_dir)
 
-# Test the model
-prompt = "Generate a D&D encounter for a party of level 5 in a forest terrain with a mystery theme."
-response = generator(prompt, max_length=200, num_return_sequences=1)
-print(response[0]["generated_text"])
+# Test the model with a sample prompt
+sample_prompt = "Generate a D&D encounter for a party of level 5 in a forest terrain with a mystery theme."
+response = generator(sample_prompt, max_length=200, num_return_sequences=1)
+generated_text = response[0]["generated_text"]
+print(f"Sample Prompt: {sample_prompt}")
+print(f"Generated Response: {generated_text}")
+
+# Evaluate the BLEU score for the generated response
+reference = ["A mysterious forest encounter for level 5 adventurers involving hidden traps and a magical artifact."]
+decoded_preds = [generated_text]
+decoded_labels = [[reference[0]]]  # Wrap reference in a list for BLEU
+bleu_score = bleu.compute(predictions=decoded_preds, references=decoded_labels)
+print(f"BLEU Score: {bleu_score}")
